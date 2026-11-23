@@ -1,27 +1,109 @@
-# Assignment-3
+# Ghost Hunting with Bayesian Inference
 
-Assignment 3: Inference and Language Modeling for CS 3600 (Intro to AI) in the Spring 2025 semester!
+An agent walks around a text adventure game, listening for a ghost it cannot see. Every sound it hears gives only a rough, noisy hint about where the ghost is. By combining many of these hints with probability, the agent works out the ghost's exact grid position and reports it once it is at least 95% sure.
 
-This repository contains all the files you'll need to get started on Assignment 3. This assignment will have you implement a Bayesian Network using `pgmpy`, complete inference, and perform some basic language modeling and text generation using N-grams. This assignment is split into two parts. Part A is worth 50 points, and Part B is worth 50 points. The overall assignment, combining the two parts for a total of 100 points, will be worth 12.5% of your final grade for Assignment 3.
+## Purpose
 
-> You are not permitted to fork this repository, as it will create a public repository that you cannot change the visibility of. If you wish to store your code in a GitHub repository, download the source code from this repository, and upload it to a new, private repository on GitHub Enterprise or your personal GitHub account.
+The project shows how an agent can reach a confident, correct answer from information that is unreliable on its own. No single sensor reading is enough to find the ghost, but each one rules some places in or out a little. Adding up that evidence in a principled way, with Bayes' rule, lets the agent pin the ghost down.
 
-## Part A - Inference
+## The game
 
-In Part A of Assignment 3, you will first explore a lab safety scenario. You are given a scenario description of key events (variables) and their relationships in [the following file](A3-A/scenario.md). You will then implement a Bayesian Network using `pgmpy` to model the relationships between all the events. You will then perform inference on the Bayesian Network to answer a series of questions about the scenario.
+The world comes from [TextWorld-Express](https://github.com/cognitiveailab/TextWorldExpress), a text adventure game: the player reads descriptions ("You are in the kitchen…") and types commands such as `move west` or `open door to south`.
 
-Next, you will explore a ghost hunting scenario in the TextWorld environment. The environment features a hidden ghost that might be inside a room or inside the walls (not in a room), but you can hear the ghost make noise. Whenever an action is taken, your agent will receive information about how far the ghost sounds, but this perceived distance is noisy. Luckily, you're also given a special sensor that gives you a distribution of the horizontal distance of the ghost from the origin of the grid. Your goal is to design an agent that can confidently locate where the ghost is. 
+- **Grid.** The rooms sit on a square grid. The player starts at `(0, 0)`. The ghost hides at a random cell inside a square from `(-d, -d)` to `(d, d)`, where `d` grows with the size of the map. That gives `(2d + 1)²` possible cells: 121 on the smallest maps and 1,849 on the largest.
+- **Hidden ghost.** The ghost can be in a room or inside a wall, so the agent can never walk in and see it. The ghost does not move.
+- **Goal.** Report the ghost's position, for example `report 3 -2`. A wrong guess ends the game.
 
-This portion of the assignment is worth 50 points, out of 100 total points for the entire assignment. Your code for the lab safety scenario and the ghost hunting scenario will be tested separately. The lab safety scenario is worth 15 points, and there are no hidden tests for this part, as the probabilities are provided in the scenario description. What you see in Gradescope upon submission is your score for that scenario. The ghost hunting scenario is worth 35 points. There are hidden tests for this part of the assignment (i.e., we will be testing your agent on other random seeds and environments, but all the parameters will be similar to the ones provided). You must test your code on further environments to ensure it works correctly. We have provided you with some sample environments to test your agent on - performance on these environments is good indication, but not a guarantee of any final score. 
+## How the agent finds the ghost
 
-## Part B - Language Modeling
+![(a) and (b): the two sensors' readings as probabilities over the true distance. (c): the agent's belief over the grid after combining both readings once.](images/belief_update.png)
 
-In Part B of Assignment 3, you will be implementing a simple language model using N-grams. You will first implement a unigram model, then a bigram model, and finally a trigram model. You will then use these models to generate text. You will also implement a function to calculate the perplexity of a given text using your language model. 
+### Step 1: Two noisy sensors
 
-This portion of the assignment is worth 50 points, out of 100 total points for the entire assignment. Your code will be tested on larger samples from the same texts provided, and there will be several trials for each model. We have provided you with some sample text files for testing your models. You should test your models on these files, as well as other text files you find online. If you write further tests on other text files, you are permitted to share the results of these tests with your peers. As a reminder, you are not permitted to share your code - all code written must be your own. 
+After every action the agent gets two readings:
 
-## Misc.
+1. **Ghost distance.** How far away the ghost sounds, as a **Manhattan distance**: the number of grid steps between the player and the ghost when you may only move up, down, left or right. From `(0, 0)` to `(3, -2)` that is 3 + 2 = **5**.
+2. **Horizontal distance.** How far the ghost is from the grid's center, counting only left and right, `|x|`. A ghost at `(3, -2)` has horizontal distance **3**, wherever the player stands.
 
-If you haven't already, make sure you get your development environment setup by following the instructions [here](https://github.gatech.edu/CS-3600-Spring-25/dev-environment-setup).
+Both readings are **noisy**: the true value plus a random error. The error is usually zero and gets less likely the bigger it is; each extra step off is half as likely as the one before. With a true distance of 5, the sensor says 5 about 34% of the time, 4 or 6 about 17% each, 3 or 7 about 8.5% each, and so on.
 
-For any questions, please post on Ed Discussion or come to office hours. We highly recommend making public posts on Ed Discussion to promote discussion between students. Furthermore, public posts make you communicate your questions without simply pasting your code, which is a great way to learn and improve your problem-solving & technical communication skills.
+Each reading comes as a list of probabilities, one per possible true distance. Panel (a) above shows a reading of 4. A true distance of 4 is the best explanation (34%), 3 or 5 are half as likely (17%), and so on. In probability terms, this list is the **likelihood**: for each possible true value, how likely it is to produce the reading we saw.
+
+### Step 2: Start with a belief over every cell
+
+The agent keeps a **probability distribution** over the grid: one number per cell saying how likely it is that the ghost is there, with all numbers adding up to 1. You can picture it as a heat map, like panel (c).
+
+At the start the agent knows nothing, so every cell gets the same probability. This starting guess is called the **prior**. On a 121-cell grid, each cell starts at 1/121 ≈ 0.8%.
+
+### Step 3: Update the belief with Bayes' rule
+
+When a reading arrives, the agent updates every cell with **Bayes' rule**:
+
+> new belief in a cell ∝ old belief in that cell × how well that cell explains the reading
+
+Then it rescales all cells so they add up to 1 again. This rescaling is called **normalization**, and the updated belief is called the **posterior**.
+
+*Example.* The player is at `(0, 0)` and hears the ghost at distance 4. Cell A, `(0, 4)`, is truly 4 steps away, so it explains the reading with likelihood 0.34. Cell B, `(0, 6)`, is 6 steps away, so its likelihood is only 0.085. If both started equally likely, A is now 4 times as likely as B.
+
+The agent applies this update twice per move, once for each sensor. The horizontal sensor alone can only tell the ghost's column, and the distance sensor alone can only tell a diamond-shaped ring around the player. Together they narrow the possibilities to a few cells, as panel (c) shows.
+
+### Step 4: Keep listening; the evidence adds up
+
+The agent repeats the update after every move, multiplying in each new reading. This is the **forward algorithm** of a **hidden Markov model (HMM)**, a standard way to track something you cannot see directly:
+
+- **Hidden state:** the thing you want to know but cannot observe, here the ghost's cell.
+- **Observations:** the noisy clues you do see, here the two sensor readings.
+- **Forward algorithm:** after each new clue, update the belief using everything seen so far, without recomputing from scratch. Normally an HMM also predicts how the hidden state moves between clues. The ghost stays put, so that step leaves the belief unchanged.
+
+One noisy reading can be misleading, but random errors don't keep pointing the same wrong way. Over many readings the true cell keeps scoring well while wrong cells fall behind, much like averaging many rough measurements gives a precise answer.
+
+### Step 5: Explore to break ties
+
+Standing in one spot is not enough. From `(0, 0)`, the cells `(0, 4)` and `(0, -4)` are both 4 steps away and have the same horizontal distance, so no number of readings can tell them apart. Panel (c) shows exactly this pair as the two darkest cells.
+
+So the agent keeps moving:
+
+- It **opens every door** it sees, so more of the map is reachable.
+- It takes a **random move** each turn. Every new position measures distance from a different spot, and that separates cells that looked identical from the old one. One step north, `(0, 4)` is 3 steps away but `(0, -4)` is 5.
+
+### Step 6: Stop when confident
+
+The agent reports a cell as soon as its probability goes above a confidence threshold **α (alpha)**. With α = 0.95, it waits until one cell holds more than 95% of the belief. A higher α means fewer wrong guesses, at the cost of listening for longer.
+
+## Testing
+
+`tests.py` runs the agent on **194 games**:
+
+- **10 map layouts:** two map types (`coin` and `mapreader`), each in five sizes, from 5 to 20 rooms.
+- **20 random seeds** per layout. A **random seed** fixes the random choices, such as where the ghost hides, so every run faces the same 194 setups.
+
+That would be 200 games, but six fail to load in TextWorld and are skipped. Each game counts as passed only if the reported cell is exactly right, and the whole test passes if accuracy is at least α = 0.95.
+
+## Result
+
+- **Saved run (in the notebook):** found the ghost in **190 of 194 games, 97.9% accuracy**, above the 95% target.
+- **Repeat runs:** because the agent moves at random, accuracy changes a little from run to run. Across 11 fresh runs, it ranged from 95.4% to 98.5% on the runs that passed (about 97% on average), and one run fell just below the 95% target.
+
+## Files
+
+| File | What it contains |
+|---|---|
+| `ghost_hunting.ipynb` | The agent (`run_agent`) and the test run with its output |
+| `helpers.py` | The ghost game: hides the ghost and produces the two noisy sensor readings |
+| `tests.py` | The 194-game test |
+| `images/belief_update.png` | The figure above |
+
+## Running it
+
+Requires Python 3.10+ and Java 1.8 or newer (TextWorld-Express runs on Java).
+
+```bash
+pip install -r requirements.txt
+jupyter notebook ghost_hunting.ipynb
+```
+
+The full test takes about 10 seconds.
+
+## Credits
+
+Built on an assignment from Georgia Tech's CS 3600 (Introduction to Artificial Intelligence), Spring 2025. The course provided the ghost game (`helpers.py`) and the test (`tests.py`); the agent in `run_agent` is my own work.

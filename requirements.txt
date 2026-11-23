@@ -1,0 +1,4 @@
+gymnasium
+textworld-express
+numpy
+jupyter

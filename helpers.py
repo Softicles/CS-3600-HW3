@@ -1,33 +1,7 @@
-from IPython.display import Image, display
-from pgmpy.models import BayesianNetwork
 from textworld_express import TextWorldExpressEnv
 import numpy as np
 import random
 import re
-import tempfile
-
-
-def visualize_bayesian_network(model: BayesianNetwork) -> None:
-    """
-    Visualizes the given Bayesian network by generating a graph
-    representation and displaying it as an image.
-
-    Creates a temporary PNG file of the Bayesian network's graph using
-    Graphviz and displays it in the IPython environment. The graph is
-    generated from the provided BayesianNetwork model.
-
-    Parameters:
-        model (BayesianNetwork): The Bayesian network model to
-        visualize.
-
-    Returns:
-        None
-    """
-
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp:
-        model_graph = model.to_graphviz()
-        model_graph.draw(temp.name, prog="dot")
-        display(Image(filename=temp.name))
 
 
 class GhostTextWorldExpressEnv(TextWorldExpressEnv):
